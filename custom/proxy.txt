@@ -1,0 +1,4 @@
+# baidu\.com
+# 1.1.1.1/32
+pixiv\.net
+pixiv\.org
