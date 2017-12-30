@@ -30,86 +30,13 @@ function getType(type_str) {
     }
 }
 
-function parseRulesFromUrl(url) {
-    let domains = {reject: [], direct: [], proxy: []}, keywords = {reject: [], direct: [], proxy: []},
-        ipcidrs = {reject: [], direct: [], proxy: []};
-    return request(url).then(body => {
-        let lines = body.split('\n');
-        lines.map(line => {
-            if (!!line) {
-                if (line.toUpperCase().startsWith('DOMAIN')) {
-                    line = line.split(',');
-                    let opt = line[0], domain = line[1], type = line[2];
-                    if (opt.endsWith('KEYWORD')) {
-                        keywords[getType(type)].push(domain)
-                    } else {
-                        domains[getType(type)].push(domain)
-                    }
-                } else if (line.toUpperCase().startsWith('IP-CIDR')) {
-                    line = line.split(',');
-                    let ip = line[1], type = line[2];
-                    ipcidrs[getType(type)].push(parseIP(ip))
-                }
-            }
-        });
-        return {domains, keywords, ipcidrs}
-    })
-}
-
 function getDomain(url) {
     url = url.replace(/https?:\/\//g, '');
-    url = url.replace(/\./g, '\\.');
-    url = url.replace('*', '.*');
     let i = url.indexOf('/');
     if (i > 1) {
         url = url.substr(0, i);
     }
     return url;
-}
-
-function parseGFWListRules() {
-    let domains = {direct: [], proxy: []};
-    return request(gfwlist_url).then(body => {
-        body = new Buffer(body, 'base64').toString();
-        let lines = body.split('\n');
-        let supplemental = false;
-        lines.map(line => {
-            if (!!line) {
-                if (!(line.startsWith('!') || line.startsWith('['))) {
-                    if (line.startsWith('||')) {
-                        line = getDomain(line.substr(2));
-                        if (!!line && !domains.proxy.includes(line)) {
-                            domains.proxy.push(line)
-                        }
-                    } else if (line.startsWith('|')) {
-                        line = getDomain(line.substr(1));
-                        if (!!line && !domains.proxy.includes(line)) {
-                            domains.proxy.push(line)
-                        }
-                    } else if (line.startsWith('@@')) {
-                        line = getDomain(line.substr(2).replace(/\|{1,2}/, ''));
-                        if (!!line && !domains.direct.includes(line)) {
-                            domains.direct.push(line)
-                        }
-                    } else {
-                        if (!line.startsWith('/') && !supplemental) {
-                            line = getDomain(line);
-                            if (!!line && !domains.proxy.includes(line)) {
-                                domains.proxy.push(line)
-                            }
-                        }
-                    }
-                } else if (line.includes('Supplemental List Start')) {
-                    supplemental = true;
-                } else if (supplemental && line.includes('Supplemental List End')) {
-                    supplemental = false;
-                }
-            }
-        });
-        domains.proxy.sort((a, b) => a.localeCompare(b));
-        domains.direct.sort((a, b) => a.localeCompare(b));
-        return {domains}
-    })
 }
 
 function parseIP(ip) {
@@ -119,6 +46,109 @@ function parseIP(ip) {
         ip: IP.toBuffer(addr),
         prefix: parseInt(mask)
     }
+}
+
+function formatDomain(domain) {
+    let {value, type} = domain;
+    if (type === 'suffix') {
+        if (value.startsWith('.')) {
+            type = 1;
+            value = value.replace(/\./g, '\\.');
+            value = value.replace('*', '.*');
+        } else {
+            type = 2
+        }
+    } else if (type === 'full') {
+        type = 1;
+        value = value.replace(/\./g, '\\.');
+        value = value.replace('*', '.*');
+        value = '^' + value + '$';
+    } else if (type === 'keyword') {
+        type = 0;
+    } else {
+        type = 1;
+    }
+    return {type, value};
+}
+
+function parseRulesFromUrl(url) {
+    let domains = {reject: [], direct: [], proxy: []}, ipcidrs = {reject: [], direct: [], proxy: []};
+    return request(url).then(body => {
+        let lines = body.split('\n');
+        lines.map(line => {
+            if (!!line) {
+                if (line.toUpperCase().startsWith('DOMAIN')) {
+                    line = line.split(',');
+                    let opt = line[0], domain = line[1], type = line[2];
+                    if (opt.endsWith('KEYWORD')) {
+                        domains[getType(type)].push({value: domain, type: 'keyword'})
+                    } else if (opt.endsWith('SUFFIX')) {
+                        domains[getType(type)].push({value: domain, type: 'suffix'})
+                    } else {
+                        domains[getType(type)].push({value: domain, type: 'full'})
+                    }
+                } else if (line.toUpperCase().startsWith('IP-CIDR')) {
+                    line = line.split(',');
+                    let ip = line[1], type = line[2];
+                    ipcidrs[getType(type)].push(ip)
+                }
+            }
+        });
+        return {domains, ipcidrs}
+    })
+}
+
+function parseGFWListRules() {
+    let direct = [], proxy = [];
+    return request(gfwlist_url).then(body => {
+        body = new Buffer(body, 'base64').toString();
+        let lines = body.split('\n');
+        let supplemental = false;
+        lines.map(line => {
+            if (!!line) {
+                if (!(line.startsWith('!') || line.startsWith('['))) {
+                    if (line.startsWith('||')) {
+                        line = getDomain(line.substr(2));
+                        if (!!line && proxy.filter(p => p.value === line).length === 0) {
+                            proxy.push({value: line, type: 'suffix'})
+                        }
+                    } else if (line.startsWith('|')) {
+                        line = getDomain(line.substr(1));
+                        if (!!line && proxy.filter(p => p.value === line).length === 0) {
+                            proxy.push({value: line, type: 'full'})
+                        }
+                    } else if (line.startsWith('@@')) {
+                        line = line.substr(2);
+                        let type = 'suffix';
+                        if (line[1] !== '|') {
+                            type = 'full'
+                        }
+                        line = getDomain(line.replace(/\|{1,2}/, ''));
+                        if (!!line && direct.filter(p => p.value === line).length === 0) {
+                            direct.push({value: line, type})
+                        }
+                    } else {
+                        if (!line.startsWith('/') && !supplemental) {
+                            line = getDomain(line);
+                            if (!!line && proxy.filter(p => p.value === line).length === 0) {
+                                proxy.push({value: line, type: 'suffix'})
+                            }
+                        } else if (line.startsWith('/')) {
+                            // regex
+                            // console.log(line)
+                        }
+                    }
+                } else if (line.includes('Supplemental List Start')) {
+                    supplemental = true;
+                } else if (supplemental && line.includes('Supplemental List End')) {
+                    supplemental = false;
+                }
+            }
+        });
+        proxy.sort((a, b) => a.value.localeCompare(b.value));
+        direct.sort((a, b) => a.value.localeCompare(b.value));
+        return {proxy, direct}
+    })
 }
 
 async function parseGeoLite() {
@@ -180,9 +210,9 @@ function loadCustomRules(filename) {
             line = line.replace('\r', '');
             if (!line.startsWith('#')) {
                 if (isCidr(line)) {
-                    ipcidrs.push(parseIP(line))
+                    ipcidrs.push(line)
                 } else {
-                    domains.push(line)
+                    domains.push({value: line, type: 'suffix'})
                 }
             }
         }
@@ -196,33 +226,44 @@ async function main() {
         let GeoSiteList = proto_root.lookupType("router.GeoSiteList");
         let GeoIPList = proto_root.lookupType("router.GeoIPList");
 
-        let sites_proxy = [], sites_direct = [], sites_reject = [], ips_proxy = [], ips_direct = [], ips_reject = [];
+        let sites_proxy = [], sites_direct = [], sites_reject = [], sites_cn = [],
+            ips_proxy = [], ips_direct = [], ips_reject = [];
 
         // load custom rules
         console.log('loading custom rules..');
+
         let proxy_custom_rules = loadCustomRules('./custom/proxy.txt');
-        sites_proxy.push(...proxy_custom_rules.domains.map(domain => Object({type: 1, value: domain})));
         ips_proxy.push(...proxy_custom_rules.ipcidrs);
+
         let direct_custom_rules = loadCustomRules('./custom/direct.txt');
-        sites_direct.push(...direct_custom_rules.domains.map(domain => Object({type: 1, value: domain})));
         ips_direct.push(...direct_custom_rules.ipcidrs);
+
         let reject_custom_rules = loadCustomRules('./custom/reject.txt');
-        sites_reject.push(...reject_custom_rules.domains.map(domain => Object({type: 1, value: domain})));
         ips_reject.push(...reject_custom_rules.ipcidrs);
+
+        let cn_custom_rules = loadCustomRules('./custom/cn.txt');
+        sites_cn = cn_custom_rules.domains.map(domain => formatDomain(domain));
         // load custom rules
 
         {
-            console.log('loading gfwlist rules..');
-            let {domains} = await parseGFWListRules();
-            let gfwlist_proxy, gfwlist_direct, gfwlist_reject = [];
-            gfwlist_proxy = domains.proxy.map(domain => Object({type: 1, value: domain}));
-            gfwlist_direct = domains.direct.map(domain => Object({type: 1, value: domain}));
-            gfwlist_proxy.push(...proxy_custom_rules.domains.map(domain => Object({type: 1, value: domain})));
-            gfwlist_direct.push(...direct_custom_rules.domains.map(domain => Object({type: 1, value: domain})));
-            gfwlist_reject.push(...reject_custom_rules.domains.map(domain => Object({type: 1, value: domain})));
+            console.log('loading gfwlist ver. rules..');
+            let {proxy: gfwlist_proxy, direct: gfwlist_direct} = await parseGFWListRules();
+            let gfwlist_reject = [];
+
+            // push custom rules
+            gfwlist_proxy.push(...proxy_custom_rules.domains);
+            gfwlist_direct.push(...direct_custom_rules.domains);
+            gfwlist_reject.push(...reject_custom_rules.domains);
+
+            // deduplicate & sort
             gfwlist_proxy = dedupe(gfwlist_proxy.sort((a, b) => a.value.localeCompare(b.value)), a => a.value);
             gfwlist_direct = dedupe(gfwlist_direct.sort((a, b) => a.value.localeCompare(b.value)), a => a.value);
             gfwlist_reject = dedupe(gfwlist_reject.sort((a, b) => a.value.localeCompare(b.value)), a => a.value);
+
+            // convert to proto
+            gfwlist_proxy = gfwlist_proxy.map(domain => formatDomain(domain));
+            gfwlist_direct = gfwlist_direct.map(domain => formatDomain(domain));
+            gfwlist_reject = gfwlist_reject.map(domain => formatDomain(domain));
 
             let site_list = GeoSiteList.create({
                 entry: [
@@ -235,6 +276,9 @@ async function main() {
                     }, {
                         countryCode: 'REJECT',
                         domain: gfwlist_reject
+                    }, {
+                        countryCode: 'CN',
+                        domain: sites_cn
                     }
                 ]
             });
@@ -243,64 +287,44 @@ async function main() {
 
             buffer = fs.readFileSync('./gfwlist/geosite.dat');
             site_list = GeoSiteList.decode(buffer);
-            console.log('write gfwlist version geosite.dat');
+            console.log('write gfwlist ver. geosite.dat');
         }
+
         {
-            console.log('loading online rules..');
+            console.log('loading surge ver. rules..');
             for (let url of rule_urls) {
-                let {domains, keywords, ipcidrs} = await parseRulesFromUrl(url);
-                keywords.proxy.map(keyword => {
-                    keyword = `.*?${keyword}.*`;
-                    if (sites_proxy.filter(site => site.value === keyword).length === 0) {
-                        sites_proxy.push({type: 1, value: keyword})
-                    }
-                });
-                keywords.direct.map(keyword => {
-                    keyword = `.*?${keyword}.*`;
-                    if (sites_direct.filter(site => site.value === keyword).length === 0) {
-                        sites_direct.push({type: 1, value: keyword})
-                    }
-                });
-                keywords.reject.map(keyword => {
-                    keyword = `.*?${keyword}.*`;
-                    if (sites_reject.filter(site => site.value === keyword).length === 0) {
-                        sites_reject.push({type: 1, value: keyword})
-                    }
-                });
-                domains.proxy.map(domain => {
-                    if (sites_proxy.filter(site => site.value.replace('\\', '') === domain).length === 0) {
-                        sites_proxy.push({type: 2, value: domain})
-                    }
-                });
-                domains.direct.map(domain => {
-                    if (sites_direct.filter(site => site.value.replace('\\', '') === domain).length === 0) {
-                        sites_direct.push({type: 2, value: domain})
-                    }
-                });
-                domains.reject.map(domain => {
-                    if (sites_reject.filter(site => site.value.replace('\\', '') === domain).length === 0) {
-                        sites_reject.push({type: 2, value: domain})
-                    }
-                });
-                ipcidrs.proxy.map(ipcidr => {
-                    if (ips_proxy.filter(cidr => cidr.ip === ipcidr.ip && cidr.prefix === ipcidr.prefix).length === 0) {
-                        ips_proxy.push(ipcidr)
-                    }
-                });
-                ipcidrs.direct.map(ipcidr => {
-                    if (ips_direct.filter(cidr => cidr.ip === ipcidr.ip && cidr.prefix === ipcidr.prefix).length === 0) {
-                        ips_direct.push(ipcidr)
-                    }
-                });
-                ipcidrs.reject.map(ipcidr => {
-                    if (ips_reject.filter(cidr => cidr.ip === ipcidr.ip && cidr.prefix === ipcidr.prefix).length === 0) {
-                        ips_reject.push(ipcidr)
-                    }
-                })
+                let {domains, ipcidrs} = await parseRulesFromUrl(url);
+                sites_proxy.push(...domains.proxy);
+                sites_direct.push(...domains.direct);
+                sites_reject.push(...domains.reject);
+                ips_proxy.push(...ipcidrs.proxy);
+                ips_direct.push(...ipcidrs.direct);
+                ips_reject.push(...ipcidrs.reject);
             }
+
+            // push custom rules
+            sites_proxy.push(...proxy_custom_rules.domains);
+            sites_direct.push(...direct_custom_rules.domains);
+            sites_reject.push(...reject_custom_rules.domains);
+            ips_proxy.push(...proxy_custom_rules.ipcidrs);
+            ips_direct.push(...direct_custom_rules.ipcidrs);
+            ips_reject.push(...reject_custom_rules.ipcidrs);
+
+            // deduplicate & sort
             sites_proxy = dedupe(sites_proxy.sort((a, b) => a.value.localeCompare(b.value)), a => a.value);
             sites_direct = dedupe(sites_direct.sort((a, b) => a.value.localeCompare(b.value)), a => a.value);
             sites_reject = dedupe(sites_reject.sort((a, b) => a.value.localeCompare(b.value)), a => a.value);
+            ips_proxy = dedupe(ips_proxy.sort((a, b) => a.localeCompare(b)));
+            ips_direct = dedupe(ips_direct.sort((a, b) => a.localeCompare(b)));
+            ips_reject = dedupe(ips_reject.sort((a, b) => a.localeCompare(b)));
+
+            // convert to proto
+            sites_proxy = sites_proxy.map(domain => formatDomain(domain));
+            sites_direct = sites_direct.map(domain => formatDomain(domain));
+            sites_reject = sites_reject.map(domain => formatDomain(domain));
+            ips_proxy = ips_proxy.map(ipcidr => parseIP(ipcidr));
+            ips_direct = ips_direct.map(ipcidr => parseIP(ipcidr));
+            ips_reject = ips_reject.map(ipcidr => parseIP(ipcidr));
 
             let site_list = GeoSiteList.create({
                 entry: [
@@ -313,6 +337,9 @@ async function main() {
                     }, {
                         countryCode: 'REJECT',
                         domain: sites_reject
+                    }, {
+                        countryCode: 'CN',
+                        domain: sites_cn
                     }
                 ]
             });
@@ -321,7 +348,7 @@ async function main() {
 
             buffer = fs.readFileSync('geosite.dat');
             site_list = GeoSiteList.decode(buffer);
-            console.log('write geosite.dat');
+            console.log('write surge ver. geosite.dat');
 
             console.log('loading geolite ip datas..');
             let geo_ips = await parseGeoLite();
