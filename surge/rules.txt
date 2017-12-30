@@ -1,0 +1,4 @@
+https://github.com/lhie1/Surge/raw/master/Basics.conf
+https://github.com/lhie1/Surge/raw/master/DIRECT.conf
+https://github.com/lhie1/Surge/raw/master/PROXY.conf
+https://github.com/lhie1/Surge/raw/master/REJECT.conf

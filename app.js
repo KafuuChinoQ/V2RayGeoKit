@@ -8,12 +8,7 @@ const IP = require('ip');
 const isCidr = require('is-cidr');
 const dedupe = require('dedupe');
 
-const rule_urls = [
-    'https://github.com/lhie1/Surge/raw/master/Basics.conf',
-    'https://github.com/lhie1/Surge/raw/master/DIRECT.conf',
-    'https://github.com/lhie1/Surge/raw/master/PROXY.conf',
-    'https://github.com/lhie1/Surge/raw/master/REJECT.conf'
-];
+const rule_urls = fs.readFileSync('./surge/rules.txt').toString().split('\n');
 
 const gfwlist_url = 'https://github.com/gfwlist/gfwlist/raw/master/gfwlist.txt';
 
@@ -293,6 +288,7 @@ async function main() {
         {
             console.log('loading surge ver. rules..');
             for (let url of rule_urls) {
+                if (!url) continue;
                 let {domains, ipcidrs} = await parseRulesFromUrl(url);
                 sites_proxy.push(...domains.proxy);
                 sites_direct.push(...domains.direct);
@@ -344,9 +340,9 @@ async function main() {
                 ]
             });
             let buffer = GeoSiteList.encode(site_list).finish();
-            fs.writeFileSync('geosite.dat', buffer);
+            fs.writeFileSync('./surge/geosite.dat', buffer);
 
-            buffer = fs.readFileSync('geosite.dat');
+            buffer = fs.readFileSync('./surge/geosite.dat');
             site_list = GeoSiteList.decode(buffer);
             console.log('write surge ver. geosite.dat');
 
@@ -368,9 +364,10 @@ async function main() {
             });
 
             buffer = GeoIPList.encode(ip_list).finish();
-            fs.writeFileSync('geoip.dat', buffer);
+            fs.writeFileSync('./surge/geoip.dat', buffer);
+            fs.writeFileSync('./gfwlist/geoip.dat', buffer);
 
-            buffer = fs.readFileSync('geoip.dat');
+            buffer = fs.readFileSync('./surge/geoip.dat');
             ip_list = GeoIPList.decode(buffer);
             console.log('write geoip.dat');
         }
