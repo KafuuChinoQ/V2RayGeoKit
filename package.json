@@ -1,10 +1,11 @@
 {
   "name": "v2raygeokit",
-  "version": "0.0.1",
+  "version": "0.0.2",
   "scripts": {
     "start": "node app.js"
   },
   "dependencies": {
+    "dedupe": "^2.1.0",
     "ip": "^1.1.5",
     "is-cidr": "^2.0.4",
     "neat-csv": "^2.1.0",
