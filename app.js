@@ -249,6 +249,9 @@ async function main() {
         sites_cn = cn_custom_rules.domains.map(domain => formatDomain(domain));
         // load custom rules
 
+        console.log('loading geolite ip datas..');
+        let geo_ips = await parseGeoLite();
+
         {
             console.log('loading gfwlist ver. rules..');
             let {proxy: gfwlist_proxy, direct: gfwlist_direct} = await parseGFWListRules();
@@ -292,6 +295,28 @@ async function main() {
             buffer = fs.readFileSync('./gfwlist/geosite.dat');
             site_list = GeoSiteList.decode(buffer);
             console.log('write gfwlist ver. geosite.dat');
+
+            let ip_list = GeoIPList.create({
+                entry: [...geo_ips,
+                    {
+                        countryCode: 'PROXY',
+                        cidr: ips_proxy
+                    }, {
+                        countryCode: 'DIRECT',
+                        cidr: ips_direct
+                    }, {
+                        countryCode: 'REJECT',
+                        cidr: ips_reject
+                    }
+                ]
+            });
+
+            buffer = GeoIPList.encode(ip_list).finish();
+            fs.writeFileSync('./gfwlist/geoip.dat', buffer);
+
+            buffer = fs.readFileSync('./gfwlist/geoip.dat');
+            ip_list = GeoIPList.decode(buffer);
+            console.log('write gfwlist ver. geoip.dat');
         }
 
         {
@@ -355,8 +380,6 @@ async function main() {
             site_list = GeoSiteList.decode(buffer);
             console.log('write surge ver. geosite.dat');
 
-            console.log('loading geolite ip datas..');
-            let geo_ips = await parseGeoLite();
             let ip_list = GeoIPList.create({
                 entry: [...geo_ips,
                     {
@@ -374,11 +397,10 @@ async function main() {
 
             buffer = GeoIPList.encode(ip_list).finish();
             fs.writeFileSync('./surge/geoip.dat', buffer);
-            fs.writeFileSync('./gfwlist/geoip.dat', buffer);
 
             buffer = fs.readFileSync('./surge/geoip.dat');
             ip_list = GeoIPList.decode(buffer);
-            console.log('write geoip.dat');
+            console.log('write surge ver. geoip.dat');
         }
     } catch (error) {
         console.error(error)
