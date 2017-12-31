@@ -26,10 +26,14 @@ function getType(type_str) {
 }
 
 function getDomain(url) {
+    url = decodeURIComponent(url);
     url = url.replace(/https?:\/\//g, '');
-    let i = url.indexOf('/');
+    let i = url.indexOf(':') > 1 ? url.indexOf(':') : url.indexOf('/');
     if (i > 1) {
         url = url.substr(0, i);
+    }
+    if (!url.includes('.')) {
+        return null;
     }
     return url;
 }
@@ -119,8 +123,13 @@ function parseGFWListRules() {
                             type = 'full'
                         }
                         line = getDomain(line.replace(/\|{1,2}/, ''));
-                        if (!!line && direct.filter(p => p.value === line).length === 0) {
-                            direct.push({value: line, type})
+                        if (!!line) {
+                            if (proxy.filter(p => p.value === line).length === 0) {
+                                proxy = proxy.filter(p => p.value !== line)
+                            }
+                            if (direct.filter(p => p.value === line).length === 0) {
+                                direct.push({value: line, type})
+                            }
                         }
                     } else {
                         if (!line.startsWith('/') && !supplemental) {
