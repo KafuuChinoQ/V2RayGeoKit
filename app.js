@@ -230,8 +230,12 @@ async function main() {
         let GeoSiteList = proto_root.lookupType("router.GeoSiteList");
         let GeoIPList = proto_root.lookupType("router.GeoIPList");
 
-        let sites_proxy = [], sites_direct = [], sites_reject = [], sites_cn = [],
-            ips_proxy = [], ips_direct = [], ips_reject = [];
+        let sites_proxy = [{value: '�', type: 'full'}],
+            sites_direct = [{value: '�', type: 'full'}],
+            sites_reject = [{value: '�', type: 'full'}], sites_cn,
+            ips_proxy = ['233.333.333.333/33'],
+            ips_direct = ['233.333.333.333/33'],
+            ips_reject = ['233.333.333.333/33'];
 
         // load custom rules
         console.log('loading custom rules..');
@@ -254,8 +258,10 @@ async function main() {
 
         {
             console.log('loading gfwlist ver. rules..');
-            let {proxy: gfwlist_proxy, direct: gfwlist_direct} = await parseGFWListRules();
-            let gfwlist_reject = [];
+            let {proxy, direct} = await parseGFWListRules();
+            let gfwlist_proxy = [{value: '�', type: 'full'}, ...proxy],
+                gfwlist_direct = [{value: '�', type: 'full'}, ...direct],
+                gfwlist_reject = [{value: '�', type: 'full'}];
 
             // push custom rules
             gfwlist_proxy.push(...proxy_custom_rules.domains);
@@ -271,6 +277,9 @@ async function main() {
             gfwlist_proxy = gfwlist_proxy.map(domain => formatDomain(domain));
             gfwlist_direct = gfwlist_direct.map(domain => formatDomain(domain));
             gfwlist_reject = gfwlist_reject.map(domain => formatDomain(domain));
+            ips_proxy = ips_proxy.map(ipcidr => parseIP(ipcidr));
+            ips_direct = ips_direct.map(ipcidr => parseIP(ipcidr));
+            ips_reject = ips_reject.map(ipcidr => parseIP(ipcidr));
 
             let site_list = GeoSiteList.create({
                 entry: [
@@ -320,6 +329,10 @@ async function main() {
         }
 
         {
+            ips_proxy = ['233.333.333.333/33'];
+            ips_direct = ['233.333.333.333/33'];
+            ips_reject = ['233.333.333.333/33'];
+
             console.log('loading surge ver. rules..');
             for (let url of rule_urls) {
                 if (!url) continue;
