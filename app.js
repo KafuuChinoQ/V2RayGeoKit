@@ -48,6 +48,7 @@ function getType(type_str) {
 }
 
 function getDomain(url) {
+    url = url.trim();
     url = decodeURIComponent(url);
     url = url.replace(/https?:\/\//g, '');
     let i = url.indexOf(':') > 1 ? url.indexOf(':') : url.indexOf('/');
@@ -97,6 +98,7 @@ function parseRulesFromUrl(url) {
     return request(url).then(body => {
         let lines = body.split('\n');
         lines.map(line => {
+            line = line.trim();
             if (!!line) {
                 if (line.toUpperCase().startsWith('DOMAIN')) {
                     line = line.split(',');
@@ -232,11 +234,14 @@ function loadCustomRules(filename, is_official = false) {
     let lines = fs.readFileSync(filename).toString();
     lines = lines.split('\n');
     lines.map(line => {
+        line = line.trim();
         if (!!line) {
             line = line.replace('\r', '');
             if (!line.startsWith('#')) {
                 if (isCidr(line)) {
-                    ipcidrs.push(line)
+                    if (!ip_rules.includes(line)) {
+                        ipcidrs.push(line)
+                    }
                 } else {
                     if (domains.filter(domain => domain.value === line).length === 0) {
                         domains.push({value: line, type: 'suffix'})
