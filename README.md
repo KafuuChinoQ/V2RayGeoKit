@@ -5,36 +5,56 @@
 example rules
 ```
 "rules": [{
-     "type": "field",
-     "ip": ["geoip:reject"],
-     "outboundTag": "reject"
-   }, {
-     "type": "field",
-     "domain": ["geosite:reject"],
-     "outboundTag": "reject"
-   }, {
-     "type": "field",
-     "ip": ["geoip:direct"],
-     "outboundTag": "direct"
-   }, {
-     "type": "field",
-     "domain": ["geosite:direct"],
-     "outboundTag": "direct"
-   }, {
-     "type": "field",
-     "ip": ["geoip:cn"],
-     "outboundTag": "direct"
-   }, {
-     "type": "field",
-     "domain": ["geosite:cn"],
-     "outboundTag": "direct"
-   }, {
-     "type": "field",
-     "ip": ["geoip:proxy"],
-     "outboundTag": "proxy"
-   }, {
-     "type": "field",
-     "domain": ["geosite:proxy"],
-     "outboundTag": "proxy"
-   }]
+      "type": "field",
+      "ip": [
+        "geoip:custom:reject",
+        "geoip:surge:reject"
+      ],
+      "outboundTag": "reject"
+    },
+    {
+      "type": "field",
+      "domain": [
+        "geosite:custom:reject",
+        "geosite:surge:reject"
+      ],
+      "outboundTag": "reject"
+    },
+    {
+      "type": "field",
+      "ip": [
+        "geoip:custom:direct",
+        "geoip:surge:direct",
+        "geoip:private"
+      ],
+      "outboundTag": "direct"
+    },
+    {
+      "type": "field",
+      "domain": [
+        "geosite:custom:direct",
+        "geosite:surge:direct",
+        "geosite:gfwlist:direct",
+        "geosite:cn"
+      ],
+      "outboundTag": "direct"
+    },
+    {
+      "type": "field",
+      "ip": [
+        "geoip:custom:proxy",
+        "geoip:surge:proxy"
+      ],
+      "outboundTag": "proxy"
+    },
+    {
+      "type": "field",
+      "domain": [
+        "geosite:custom:proxy",
+        "geosite:surge:proxy",
+        "geosite:gfwlist:proxy"
+      ],
+      "outboundTag": "proxy"
+    }
+  ]
 ```

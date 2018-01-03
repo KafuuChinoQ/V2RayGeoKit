@@ -8,9 +8,31 @@ const IP = require('ip');
 const isCidr = require('is-cidr');
 const dedupe = require('dedupe');
 
-const rule_urls = fs.readFileSync('./surge/rules.txt').toString().split('\n');
+const rule_urls = fs.readFileSync('./surge_rules.txt').toString().split('\n');
 
 const gfwlist_url = 'https://github.com/gfwlist/gfwlist/raw/master/gfwlist.txt';
+
+const site_rules = {}, ip_rules = {};
+
+function pushSiteRules(country_code, rules) {
+    if (rules.length > 0) {
+        if (!!site_rules[country_code]) {
+            rules.push(...site_rules[country_code]);
+            rules = dedupe(rules.sort((a, b) => a.value.localeCompare(b.value)), a => a.value);
+        }
+        site_rules[country_code] = rules
+    }
+}
+
+function pushIPRules(country_code, rules) {
+    if (rules.length > 0) {
+        if (!!ip_rules[country_code]) {
+            rules.push(...ip_rules[country_code]);
+            rules = dedupe(rules.sort((a, b) => a.localeCompare(b)), a => a);
+        }
+        ip_rules[country_code] = rules
+    }
+}
 
 function getType(type_str) {
     type_str = type_str.toLowerCase();
@@ -205,7 +227,7 @@ async function parseGeoLite() {
     return cidrs;
 }
 
-function loadCustomRules(filename) {
+function loadCustomRules(filename, is_official = false) {
     let domains = [], ipcidrs = [];
     let lines = fs.readFileSync(filename).toString();
     lines = lines.split('\n');
@@ -216,11 +238,20 @@ function loadCustomRules(filename) {
                 if (isCidr(line)) {
                     ipcidrs.push(line)
                 } else {
-                    domains.push({value: line, type: 'suffix'})
+                    if (domains.filter(domain => domain.value === line).length === 0) {
+                        domains.push({value: line, type: 'suffix'})
+                    }
                 }
             }
         }
     });
+    if (!is_official && domains.length === 0) {
+        domains.push({value: '�', type: 'full'})
+    }
+    domains = domains.sort((a, b) => a.value.localeCompare(b.value));
+    if (!is_official && ipcidrs.length === 0) {
+        ipcidrs.push('233.333.333.333/33')
+    }
     return {domains, ipcidrs}
 }
 
@@ -230,191 +261,82 @@ async function main() {
         let GeoSiteList = proto_root.lookupType("router.GeoSiteList");
         let GeoIPList = proto_root.lookupType("router.GeoIPList");
 
-        let sites_proxy = [{value: '�', type: 'full'}],
-            sites_direct = [{value: '�', type: 'full'}],
-            sites_reject = [{value: '�', type: 'full'}], sites_cn,
-            ips_proxy = ['233.333.333.333/33'],
-            ips_direct = ['233.333.333.333/33'],
-            ips_reject = ['233.333.333.333/33'];
+        // load official rules
+        console.log('loading official rules..');
+        let official_filenames = fs.readdirSync('./official');
+        for (let official_filename of official_filenames) {
+            let country_code = official_filename.substr(0, official_filename.indexOf('.'));
+            let {domains, ipcidrs} = loadCustomRules('./official/' + official_filename, true);
+            pushSiteRules(country_code, domains);
+            pushIPRules(country_code, ipcidrs);
+        }
+        // load official rules
 
         // load custom rules
         console.log('loading custom rules..');
-
-        let proxy_custom_rules = loadCustomRules('./custom/proxy.txt');
-        ips_proxy.push(...proxy_custom_rules.ipcidrs);
-
-        let direct_custom_rules = loadCustomRules('./custom/direct.txt');
-        ips_direct.push(...direct_custom_rules.ipcidrs);
-
-        let reject_custom_rules = loadCustomRules('./custom/reject.txt');
-        ips_reject.push(...reject_custom_rules.ipcidrs);
-
-        let cn_custom_rules = loadCustomRules('./custom/cn.txt');
-        sites_cn = cn_custom_rules.domains.map(domain => formatDomain(domain));
+        let custom_filenames = fs.readdirSync('./custom');
+        for (let custom_filename of custom_filenames) {
+            let country_code = custom_filename.substr(0, custom_filename.indexOf('.'));
+            let {domains, ipcidrs} = loadCustomRules('./custom/' + custom_filename);
+            pushSiteRules('custom:' + country_code, domains);
+            pushIPRules('custom:' + country_code, ipcidrs);
+        }
         // load custom rules
 
         console.log('loading geolite ip datas..');
         let geo_ips = await parseGeoLite();
 
-        {
-            console.log('loading gfwlist ver. rules..');
-            let {proxy, direct} = await parseGFWListRules();
-            let gfwlist_proxy = [{value: '�', type: 'full'}, ...proxy],
-                gfwlist_direct = [{value: '�', type: 'full'}, ...direct],
-                gfwlist_reject = [{value: '�', type: 'full'}];
+        console.log('loading gfwlist rules..');
+        let {proxy, direct} = await parseGFWListRules();
+        pushSiteRules('gfwlist:proxy', proxy);
+        pushSiteRules('gfwlist:direct', direct);
 
-            // push custom rules
-            gfwlist_proxy.push(...proxy_custom_rules.domains);
-            gfwlist_direct.push(...direct_custom_rules.domains);
-            gfwlist_reject.push(...reject_custom_rules.domains);
-
-            // deduplicate & sort
-            gfwlist_proxy = dedupe(gfwlist_proxy.sort((a, b) => a.value.localeCompare(b.value)), a => a.value);
-            gfwlist_direct = dedupe(gfwlist_direct.sort((a, b) => a.value.localeCompare(b.value)), a => a.value);
-            gfwlist_reject = dedupe(gfwlist_reject.sort((a, b) => a.value.localeCompare(b.value)), a => a.value);
-
-            // convert to proto
-            gfwlist_proxy = gfwlist_proxy.map(domain => formatDomain(domain));
-            gfwlist_direct = gfwlist_direct.map(domain => formatDomain(domain));
-            gfwlist_reject = gfwlist_reject.map(domain => formatDomain(domain));
-            ips_proxy = ips_proxy.map(ipcidr => parseIP(ipcidr));
-            ips_direct = ips_direct.map(ipcidr => parseIP(ipcidr));
-            ips_reject = ips_reject.map(ipcidr => parseIP(ipcidr));
-
-            let site_list = GeoSiteList.create({
-                entry: [
-                    {
-                        countryCode: 'PROXY',
-                        domain: gfwlist_proxy
-                    }, {
-                        countryCode: 'DIRECT',
-                        domain: gfwlist_direct
-                    }, {
-                        countryCode: 'REJECT',
-                        domain: gfwlist_reject
-                    }, {
-                        countryCode: 'CN',
-                        domain: sites_cn
-                    }
-                ]
-            });
-            let buffer = GeoSiteList.encode(site_list).finish();
-            fs.writeFileSync('./gfwlist/geosite.dat', buffer);
-
-            buffer = fs.readFileSync('./gfwlist/geosite.dat');
-            site_list = GeoSiteList.decode(buffer);
-            console.log('write gfwlist ver. geosite.dat');
-
-            let ip_list = GeoIPList.create({
-                entry: [...geo_ips,
-                    {
-                        countryCode: 'PROXY',
-                        cidr: ips_proxy
-                    }, {
-                        countryCode: 'DIRECT',
-                        cidr: ips_direct
-                    }, {
-                        countryCode: 'REJECT',
-                        cidr: ips_reject
-                    }
-                ]
-            });
-
-            buffer = GeoIPList.encode(ip_list).finish();
-            fs.writeFileSync('./gfwlist/geoip.dat', buffer);
-
-            buffer = fs.readFileSync('./gfwlist/geoip.dat');
-            ip_list = GeoIPList.decode(buffer);
-            console.log('write gfwlist ver. geoip.dat');
-        }
-
-        {
-            ips_proxy = ['233.333.333.333/33'];
-            ips_direct = ['233.333.333.333/33'];
-            ips_reject = ['233.333.333.333/33'];
-
-            console.log('loading surge ver. rules..');
-            for (let url of rule_urls) {
-                if (!url) continue;
-                let {domains, ipcidrs} = await parseRulesFromUrl(url);
-                sites_proxy.push(...domains.proxy);
-                sites_direct.push(...domains.direct);
-                sites_reject.push(...domains.reject);
-                ips_proxy.push(...ipcidrs.proxy);
-                ips_direct.push(...ipcidrs.direct);
-                ips_reject.push(...ipcidrs.reject);
+        console.log('loading surge style rules..');
+        for (let url of rule_urls) {
+            if (!url) continue;
+            let {domains, ipcidrs} = await parseRulesFromUrl(url);
+            for (let key in domains) {
+                if (domains.hasOwnProperty(key)) {
+                    pushSiteRules('surge:' + key, domains[key]);
+                }
             }
-
-            // push custom rules
-            sites_proxy.push(...proxy_custom_rules.domains);
-            sites_direct.push(...direct_custom_rules.domains);
-            sites_reject.push(...reject_custom_rules.domains);
-            ips_proxy.push(...proxy_custom_rules.ipcidrs);
-            ips_direct.push(...direct_custom_rules.ipcidrs);
-            ips_reject.push(...reject_custom_rules.ipcidrs);
-
-            // deduplicate & sort
-            sites_proxy = dedupe(sites_proxy.sort((a, b) => a.value.localeCompare(b.value)), a => a.value);
-            sites_direct = dedupe(sites_direct.sort((a, b) => a.value.localeCompare(b.value)), a => a.value);
-            sites_reject = dedupe(sites_reject.sort((a, b) => a.value.localeCompare(b.value)), a => a.value);
-            ips_proxy = dedupe(ips_proxy.sort((a, b) => a.localeCompare(b)));
-            ips_direct = dedupe(ips_direct.sort((a, b) => a.localeCompare(b)));
-            ips_reject = dedupe(ips_reject.sort((a, b) => a.localeCompare(b)));
-
-            // convert to proto
-            sites_proxy = sites_proxy.map(domain => formatDomain(domain));
-            sites_direct = sites_direct.map(domain => formatDomain(domain));
-            sites_reject = sites_reject.map(domain => formatDomain(domain));
-            ips_proxy = ips_proxy.map(ipcidr => parseIP(ipcidr));
-            ips_direct = ips_direct.map(ipcidr => parseIP(ipcidr));
-            ips_reject = ips_reject.map(ipcidr => parseIP(ipcidr));
-
-            let site_list = GeoSiteList.create({
-                entry: [
-                    {
-                        countryCode: 'PROXY',
-                        domain: sites_proxy
-                    }, {
-                        countryCode: 'DIRECT',
-                        domain: sites_direct
-                    }, {
-                        countryCode: 'REJECT',
-                        domain: sites_reject
-                    }, {
-                        countryCode: 'CN',
-                        domain: sites_cn
-                    }
-                ]
-            });
-            let buffer = GeoSiteList.encode(site_list).finish();
-            fs.writeFileSync('./surge/geosite.dat', buffer);
-
-            buffer = fs.readFileSync('./surge/geosite.dat');
-            site_list = GeoSiteList.decode(buffer);
-            console.log('write surge ver. geosite.dat');
-
-            let ip_list = GeoIPList.create({
-                entry: [...geo_ips,
-                    {
-                        countryCode: 'PROXY',
-                        cidr: ips_proxy
-                    }, {
-                        countryCode: 'DIRECT',
-                        cidr: ips_direct
-                    }, {
-                        countryCode: 'REJECT',
-                        cidr: ips_reject
-                    }
-                ]
-            });
-
-            buffer = GeoIPList.encode(ip_list).finish();
-            fs.writeFileSync('./surge/geoip.dat', buffer);
-
-            buffer = fs.readFileSync('./surge/geoip.dat');
-            ip_list = GeoIPList.decode(buffer);
-            console.log('write surge ver. geoip.dat');
+            for (let key in ipcidrs) {
+                if (ipcidrs.hasOwnProperty(key)) {
+                    pushIPRules('surge:' + key, ipcidrs[key]);
+                }
+            }
         }
+
+        let site_list = GeoSiteList.create({
+            entry: Object.keys(site_rules).map(key => {
+                let rules = site_rules[key];
+                rules = rules.map(domain => formatDomain(domain));
+                return {countryCode: key.toUpperCase(), domain: rules}
+            })
+        });
+        let buffer = GeoSiteList.encode(site_list).finish();
+        fs.writeFileSync('./dist/geosite.dat', buffer);
+
+        buffer = fs.readFileSync('./dist/geosite.dat');
+        GeoSiteList.decode(buffer);
+        console.log('write geosite.dat');
+
+        let ip_list = GeoIPList.create({
+            entry: [...geo_ips,
+                ...Object.keys(ip_rules).map(key => {
+                    let rules = ip_rules[key];
+                    rules = rules.map(ip => parseIP(ip));
+                    return {countryCode: key.toUpperCase(), cidr: rules}
+                })
+            ]
+        });
+
+        buffer = GeoIPList.encode(ip_list).finish();
+        fs.writeFileSync('./dist/geoip.dat', buffer);
+
+        buffer = fs.readFileSync('./dist/geoip.dat');
+        GeoIPList.decode(buffer);
+        console.log('write geoip.dat');
     } catch (error) {
         console.error(error)
     }
