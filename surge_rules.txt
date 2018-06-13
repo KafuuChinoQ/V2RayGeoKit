@@ -1,4 +1,4 @@
-https://github.com/lhie1/Surge/raw/master/Basics.conf
-https://github.com/lhie1/Surge/raw/master/DIRECT.conf
-https://github.com/lhie1/Surge/raw/master/PROXY.conf
-https://github.com/lhie1/Surge/raw/master/REJECT.conf
+https://raw.githubusercontent.com/lhie1/Rules/master/Surge.conf
+https://raw.githubusercontent.com/lhie1/Rules/master/Shadowrocket.conf
+https://raw.githubusercontent.com/lhie1/Rules/master/Quantumult/Quantumult.conf
+https://raw.githubusercontent.com/lhie1/Rules/master/Quantumult/Quantumult_URL.conf
